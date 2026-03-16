@@ -1,11 +1,11 @@
 import TelegramBot from 'node-telegram-bot-api';
 import fetch from 'node-fetch';
-import dotenv from 'dotenv';
 
-dotenv.config();
+// Hardcoded configuration - no setup needed!
+const BOT_TOKEN = '8553890523:AAE-kpeYfUPq-AgnLNKIBuVzLA8Wj3syZcE';
+const API_URL = 'https://kind-insight-production.up.railway.app/api';
 
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
-const API_URL = process.env.API_URL;
+const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 // Authorized users (Telegram usernames)
 const AUTHORIZED_USERS = ['saleh', 'ahmad', 'omar'];
