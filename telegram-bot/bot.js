@@ -4,32 +4,94 @@ import fetch from 'node-fetch';
 // Hardcoded configuration - no setup needed!
 const BOT_TOKEN = '8553890523:AAE-kpeYfUPq-AgnLNKIBuVzLA8Wj3syZcE';
 const API_URL = 'https://kind-insight-production.up.railway.app/api';
+const OPENAI_API_KEY = 'YOUR_OPENAI_API_KEY_HERE'; // Add your OpenAI key here for smart task parsing
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
-
-// Authorized users (Telegram usernames)
-const AUTHORIZED_USERS = ['saleh', 'ahmad', 'omar'];
 
 // User state for multi-step task creation
 const userStates = {};
 
-// Check if user is authorized
-const isAuthorized = (username) => {
-  return AUTHORIZED_USERS.includes(username?.toLowerCase());
+// Map Telegram user to team member
+const getUserMapping = (telegramUser) => {
+  const firstName = telegramUser.first_name?.toLowerCase() || '';
+  const username = telegramUser.username?.toLowerCase() || '';
+  
+  // Try to match to team members
+  if (firstName.includes('saleh') || username.includes('saleh')) return 'saleh';
+  if (firstName.includes('ahmad') || username.includes('ahmad')) return 'ahmad';
+  if (firstName.includes('omar') || username.includes('omar')) return 'omar';
+  
+  // Default to first name or username
+  return username || firstName || 'user';
 };
+
+// Parse task using OpenAI (if API key is provided)
+async function parseTaskWithAI(text, username) {
+  if (!OPENAI_API_KEY || OPENAI_API_KEY === 'YOUR_OPENAI_API_KEY_HERE') {
+    return parseTaskSimple(text, username);
+  }
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a task parser. Extract task details from user input and return JSON with: title, description, priority (high/medium/low), deadline (YYYY-MM-DD), assigned_to (array of: saleh, ahmad, omar). Today is ${new Date().toISOString().split('T')[0]}.`
+          },
+          {
+            role: 'user',
+            content: text
+          }
+        ],
+        temperature: 0.3,
+      }),
+    });
+
+    const data = await response.json();
+    const parsed = JSON.parse(data.choices[0].message.content);
+    
+    return {
+      title: parsed.title || text,
+      description: parsed.description || '',
+      assigned_to: parsed.assigned_to || [username],
+      priority: parsed.priority || 'medium',
+      status: 'todo',
+      deadline: parsed.deadline || getTomorrow(),
+    };
+  } catch (error) {
+    console.error('OpenAI parsing failed, using simple parser:', error);
+    return parseTaskSimple(text, username);
+  }
+}
+
+// Simple task parser (fallback)
+function parseTaskSimple(text, username) {
+  return {
+    title: text,
+    description: '',
+    assigned_to: [username],
+    priority: detectPriority(text),
+    status: 'todo',
+    deadline: detectDeadline(text) || getTomorrow(),
+  };
+}
 
 // Start command
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
-  const username = msg.from.username;
-
-  if (!isAuthorized(username)) {
-    bot.sendMessage(chatId, '❌ Unauthorized. Only Saleh, Ahmad, and Omar can use this bot.');
-    return;
-  }
+  const user = getUserMapping(msg.from);
 
   const welcomeMessage = `
 🎮 Welcome to Task Manager Bot!
+
+👋 Hi ${msg.from.first_name}! You're mapped to: ${user}
 
 Commands:
 /newtask - Create a new task
@@ -39,6 +101,8 @@ Commands:
 
 Quick add: Just type your task and I'll create it!
 Example: "Follow up with client by Friday"
+
+${OPENAI_API_KEY !== 'YOUR_OPENAI_API_KEY_HERE' ? '🤖 AI-powered task parsing enabled!' : ''}
   `;
 
   bot.sendMessage(chatId, welcomeMessage);
@@ -71,12 +135,6 @@ I'll automatically detect:
 // New task command (detailed)
 bot.onText(/\/newtask/, (msg) => {
   const chatId = msg.chat.id;
-  const username = msg.from.username;
-
-  if (!isAuthorized(username)) {
-    bot.sendMessage(chatId, '❌ Unauthorized.');
-    return;
-  }
 
   userStates[chatId] = { step: 'title' };
   bot.sendMessage(chatId, '📝 What\'s the task title?');
@@ -85,12 +143,7 @@ bot.onText(/\/newtask/, (msg) => {
 // My tasks command
 bot.onText(/\/mytasks/, async (msg) => {
   const chatId = msg.chat.id;
-  const username = msg.from.username?.toLowerCase();
-
-  if (!isAuthorized(username)) {
-    bot.sendMessage(chatId, '❌ Unauthorized.');
-    return;
-  }
+  const username = getUserMapping(msg.from);
 
   try {
     const response = await fetch(`${API_URL}/tasks`);
@@ -122,12 +175,6 @@ bot.onText(/\/mytasks/, async (msg) => {
 // All tasks command
 bot.onText(/\/alltasks/, async (msg) => {
   const chatId = msg.chat.id;
-  const username = msg.from.username;
-
-  if (!isAuthorized(username)) {
-    bot.sendMessage(chatId, '❌ Unauthorized.');
-    return;
-  }
 
   try {
     const response = await fetch(`${API_URL}/tasks`);
@@ -162,15 +209,10 @@ bot.onText(/\/alltasks/, async (msg) => {
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
-  const username = msg.from.username?.toLowerCase();
+  const username = getUserMapping(msg.from);
 
   // Skip if it's a command
   if (text?.startsWith('/')) return;
-
-  if (!isAuthorized(username)) {
-    bot.sendMessage(chatId, '❌ Unauthorized.');
-    return;
-  }
 
   // Handle multi-step task creation
   if (userStates[chatId]) {
@@ -178,8 +220,10 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // Quick task creation from natural language
-  await createQuickTask(chatId, text, username);
+  // Quick task creation with AI or simple parsing
+  bot.sendMessage(chatId, '🤖 Creating task...');
+  const task = await parseTaskWithAI(text, username);
+  await createTask(chatId, task);
 });
 
 // Handle multi-step task creation
@@ -212,23 +256,9 @@ async function handleTaskCreationStep(chatId, text, username) {
   }
 }
 
-// Quick task creation from natural language
+// Quick task creation from natural language (fallback)
 async function createQuickTask(chatId, text, username) {
-  const task = {
-    title: text,
-    description: '',
-    assigned_to: [username],
-    priority: detectPriority(text),
-    status: 'todo',
-    deadline: detectDeadline(text) || getTomorrow(),
-  };
-
-  // Detect assignments
-  const mentions = text.match(/@(saleh|ahmad|omar)/gi);
-  if (mentions) {
-    task.assigned_to = mentions.map(m => m.substring(1).toLowerCase());
-  }
-
+  const task = parseTaskSimple(text, username);
   await createTask(chatId, task);
 }
 
