@@ -1,7 +1,9 @@
-// Temporary localStorage solution until backend is deployed
-// This will work on single device until you configure Railway backend
+// Hardcoded Railway backend URL - works across all devices!
+const API_URL = 'https://newest-to-do-list-production.up.railway.app/api';
 
+// Fallback to localStorage if backend is unavailable
 const STORAGE_KEY = 'team_tasks';
+const USE_BACKEND = true; // Set to false to use localStorage only
 
 const INITIAL_TASKS = [
   {
@@ -56,7 +58,29 @@ const INITIAL_TASKS = [
   },
 ];
 
-// Initialize tasks in localStorage if not exists
+// Map API response to frontend format
+const mapTaskFromAPI = (task) => ({
+  id: task.id.toString(),
+  title: task.title,
+  description: task.description,
+  assignedTo: task.assigned_to || [],
+  priority: task.priority,
+  status: task.status,
+  deadline: task.deadline,
+  createdAt: task.created_at,
+});
+
+// Map frontend format to API format
+const mapTaskToAPI = (task) => ({
+  title: task.title,
+  description: task.description,
+  assigned_to: task.assignedTo,
+  priority: task.priority,
+  status: task.status,
+  deadline: task.deadline,
+});
+
+// Initialize tasks in localStorage if not exists (fallback)
 const initializeTasks = () => {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (!stored) {
@@ -67,42 +91,128 @@ const initializeTasks = () => {
 };
 
 export const getTasks = async () => {
-  return Promise.resolve(initializeTasks());
+  if (!USE_BACKEND) {
+    return Promise.resolve(initializeTasks());
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/tasks`);
+    if (!response.ok) throw new Error('Backend unavailable');
+    const tasks = await response.json();
+    return tasks.map(mapTaskFromAPI);
+  } catch (error) {
+    console.warn('Backend unavailable, using localStorage:', error);
+    return initializeTasks();
+  }
 };
 
 export const addTask = async (task) => {
-  const tasks = initializeTasks();
-  const newTask = {
-    ...task,
-    id: Date.now().toString(),
-    createdAt: new Date().toISOString(),
-  };
-  tasks.push(newTask);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-  notifyTaskUpdate();
-  return newTask;
+  if (!USE_BACKEND) {
+    const tasks = initializeTasks();
+    const newTask = {
+      ...task,
+      id: Date.now().toString(),
+      createdAt: new Date().toISOString(),
+    };
+    tasks.push(newTask);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    notifyTaskUpdate();
+    return newTask;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(mapTaskToAPI(task)),
+    });
+    if (!response.ok) throw new Error('Failed to create task');
+    const newTask = await response.json();
+    notifyTaskUpdate();
+    return mapTaskFromAPI(newTask);
+  } catch (error) {
+    console.error('Backend error, using localStorage:', error);
+    const tasks = initializeTasks();
+    const newTask = {
+      ...task,
+      id: Date.now().toString(),
+      createdAt: new Date().toISOString(),
+    };
+    tasks.push(newTask);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    notifyTaskUpdate();
+    return newTask;
+  }
 };
 
 export const updateTask = async (taskId, updates) => {
-  const tasks = initializeTasks();
-  const index = tasks.findIndex((t) => t.id === taskId);
-  if (index !== -1) {
-    tasks[index] = { ...tasks[index], ...updates };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+  if (!USE_BACKEND) {
+    const tasks = initializeTasks();
+    const index = tasks.findIndex((t) => t.id === taskId);
+    if (index !== -1) {
+      tasks[index] = { ...tasks[index], ...updates };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+      notifyTaskUpdate();
+    }
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/tasks/${taskId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(mapTaskToAPI(updates)),
+    });
+    if (!response.ok) throw new Error('Failed to update task');
     notifyTaskUpdate();
+  } catch (error) {
+    console.error('Backend error, using localStorage:', error);
+    const tasks = initializeTasks();
+    const index = tasks.findIndex((t) => t.id === taskId);
+    if (index !== -1) {
+      tasks[index] = { ...tasks[index], ...updates };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+      notifyTaskUpdate();
+    }
   }
 };
 
 export const deleteTask = async (taskId) => {
-  const tasks = initializeTasks();
-  const filtered = tasks.filter((t) => t.id !== taskId);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
-  notifyTaskUpdate();
+  if (!USE_BACKEND) {
+    const tasks = initializeTasks();
+    const filtered = tasks.filter((t) => t.id !== taskId);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+    notifyTaskUpdate();
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/tasks/${taskId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) throw new Error('Failed to delete task');
+    notifyTaskUpdate();
+  } catch (error) {
+    console.error('Backend error, using localStorage:', error);
+    const tasks = initializeTasks();
+    const filtered = tasks.filter((t) => t.id !== taskId);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+    notifyTaskUpdate();
+  }
 };
 
 export const subscribeToTasks = (callback) => {
   // Initial load
   getTasks().then(callback);
+  
+  // Poll for updates if using backend
+  let interval;
+  if (USE_BACKEND) {
+    interval = setInterval(async () => {
+      const tasks = await getTasks();
+      callback(tasks);
+    }, 5000); // Check every 5 seconds
+  }
   
   // Listen for custom update events
   const handleTaskUpdate = async () => {
@@ -113,6 +223,7 @@ export const subscribeToTasks = (callback) => {
   window.addEventListener('tasksUpdated', handleTaskUpdate);
 
   return () => {
+    if (interval) clearInterval(interval);
     window.removeEventListener('tasksUpdated', handleTaskUpdate);
   };
 };
