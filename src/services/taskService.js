@@ -91,35 +91,18 @@ const initializeTasks = () => {
 };
 
 export const getTasks = async () => {
-  if (!USE_BACKEND) {
-    return Promise.resolve(initializeTasks());
-  }
-
   try {
     const response = await fetch(`${API_URL}/tasks`);
     if (!response.ok) throw new Error('Backend unavailable');
     const tasks = await response.json();
     return tasks.map(mapTaskFromAPI);
   } catch (error) {
-    console.warn('Backend unavailable, using localStorage:', error);
-    return initializeTasks();
+    console.error('Error fetching tasks:', error);
+    return []; // Return empty array if backend fails
   }
 };
 
 export const addTask = async (task) => {
-  if (!USE_BACKEND) {
-    const tasks = initializeTasks();
-    const newTask = {
-      ...task,
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-    };
-    tasks.push(newTask);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-    notifyTaskUpdate();
-    return newTask;
-  }
-
   try {
     const response = await fetch(`${API_URL}/tasks`, {
       method: 'POST',
@@ -131,32 +114,12 @@ export const addTask = async (task) => {
     notifyTaskUpdate();
     return mapTaskFromAPI(newTask);
   } catch (error) {
-    console.error('Backend error, using localStorage:', error);
-    const tasks = initializeTasks();
-    const newTask = {
-      ...task,
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-    };
-    tasks.push(newTask);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-    notifyTaskUpdate();
-    return newTask;
+    console.error('Error creating task:', error);
+    throw error;
   }
 };
 
 export const updateTask = async (taskId, updates) => {
-  if (!USE_BACKEND) {
-    const tasks = initializeTasks();
-    const index = tasks.findIndex((t) => t.id === taskId);
-    if (index !== -1) {
-      tasks[index] = { ...tasks[index], ...updates };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-      notifyTaskUpdate();
-    }
-    return;
-  }
-
   try {
     const response = await fetch(`${API_URL}/tasks/${taskId}`, {
       method: 'PUT',
@@ -166,26 +129,12 @@ export const updateTask = async (taskId, updates) => {
     if (!response.ok) throw new Error('Failed to update task');
     notifyTaskUpdate();
   } catch (error) {
-    console.error('Backend error, using localStorage:', error);
-    const tasks = initializeTasks();
-    const index = tasks.findIndex((t) => t.id === taskId);
-    if (index !== -1) {
-      tasks[index] = { ...tasks[index], ...updates };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-      notifyTaskUpdate();
-    }
+    console.error('Error updating task:', error);
+    throw error;
   }
 };
 
 export const deleteTask = async (taskId) => {
-  if (!USE_BACKEND) {
-    const tasks = initializeTasks();
-    const filtered = tasks.filter((t) => t.id !== taskId);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
-    notifyTaskUpdate();
-    return;
-  }
-
   try {
     const response = await fetch(`${API_URL}/tasks/${taskId}`, {
       method: 'DELETE',
@@ -193,11 +142,8 @@ export const deleteTask = async (taskId) => {
     if (!response.ok) throw new Error('Failed to delete task');
     notifyTaskUpdate();
   } catch (error) {
-    console.error('Backend error, using localStorage:', error);
-    const tasks = initializeTasks();
-    const filtered = tasks.filter((t) => t.id !== taskId);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
-    notifyTaskUpdate();
+    console.error('Error deleting task:', error);
+    throw error;
   }
 };
 
@@ -205,14 +151,11 @@ export const subscribeToTasks = (callback) => {
   // Initial load
   getTasks().then(callback);
   
-  // Poll for updates if using backend
-  let interval;
-  if (USE_BACKEND) {
-    interval = setInterval(async () => {
-      const tasks = await getTasks();
-      callback(tasks);
-    }, 5000); // Check every 5 seconds
-  }
+  // Poll for updates every 5 seconds
+  const interval = setInterval(async () => {
+    const tasks = await getTasks();
+    callback(tasks);
+  }, 5000);
   
   // Listen for custom update events
   const handleTaskUpdate = async () => {
@@ -223,7 +166,7 @@ export const subscribeToTasks = (callback) => {
   window.addEventListener('tasksUpdated', handleTaskUpdate);
 
   return () => {
-    if (interval) clearInterval(interval);
+    clearInterval(interval);
     window.removeEventListener('tasksUpdated', handleTaskUpdate);
   };
 };
