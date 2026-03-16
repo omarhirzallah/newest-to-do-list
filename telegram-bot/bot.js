@@ -287,8 +287,13 @@ bot.on('message', async (msg) => {
 
   // Quick task creation with AI or simple parsing
   bot.sendMessage(chatId, '🤖 Creating task...');
-  const task = await parseTaskWithAI(text, username);
-  await createTask(chatId, task);
+  try {
+    const task = await parseTaskWithAI(text, username);
+    await createTask(chatId, task);
+  } catch (error) {
+    console.error('Task creation error:', error);
+    bot.sendMessage(chatId, '❌ Failed to create task. Error: ' + error.message);
+  }
 });
 
 // Handle task queries
@@ -377,6 +382,8 @@ async function createQuickTask(chatId, text, username) {
 // Create task via API
 async function createTask(chatId, taskData) {
   try {
+    console.log('Creating task:', taskData);
+    
     const response = await fetch(`${API_URL}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -384,12 +391,16 @@ async function createTask(chatId, taskData) {
     });
 
     if (response.ok) {
-      bot.sendMessage(chatId, `✅ Task created!\n\n📝 ${taskData.title}\n📅 ${taskData.deadline}\n👤 ${taskData.assigned_to.join(', ')}`);
+      const created = await response.json();
+      bot.sendMessage(chatId, `✅ Task created!\n\n📝 ${taskData.title}\n📅 ${taskData.deadline}\n👤 ${taskData.assigned_to.join(', ')}\n🎯 Priority: ${taskData.priority}`);
     } else {
-      bot.sendMessage(chatId, '❌ Failed to create task.');
+      const errorText = await response.text();
+      console.error('Backend error:', errorText);
+      bot.sendMessage(chatId, '❌ Failed to create task. Backend error: ' + response.status);
     }
   } catch (error) {
-    bot.sendMessage(chatId, '❌ Error creating task.');
+    console.error('Network error:', error);
+    bot.sendMessage(chatId, '❌ Error creating task. Check if backend is running.');
   }
 }
 
@@ -401,15 +412,39 @@ function detectPriority(text) {
 }
 
 function detectDeadline(text) {
-  if (/today/i.test(text)) return getToday();
-  if (/tomorrow/i.test(text)) return getTomorrow();
-  if (/friday/i.test(text)) return getNextFriday();
+  const textLower = text.toLowerCase();
+  
+  if (/\btoday\b/i.test(textLower)) return getToday();
+  if (/\btomorrow\b/i.test(textLower)) return getTomorrow();
+  if (/\bfriday\b/i.test(textLower)) return getNextFriday();
+  if (/\bmonday\b/i.test(textLower)) return getNextWeekday(1);
+  if (/\btuesday\b/i.test(textLower)) return getNextWeekday(2);
+  if (/\bwednesday\b/i.test(textLower)) return getNextWeekday(3);
+  if (/\bthursday\b/i.test(textLower)) return getNextWeekday(4);
+  if (/\bsaturday\b/i.test(textLower)) return getNextWeekday(6);
+  if (/\bsunday\b/i.test(textLower)) return getNextWeekday(0);
   
   // Try to match YYYY-MM-DD format
   const dateMatch = text.match(/\d{4}-\d{2}-\d{2}/);
   if (dateMatch) return dateMatch[0];
   
   return null;
+}
+
+function getNextWeekday(targetDay) {
+  const today = new Date();
+  const currentDay = today.getDay();
+  let daysUntil;
+  
+  if (currentDay < targetDay) {
+    daysUntil = targetDay - currentDay;
+  } else {
+    daysUntil = 7 - currentDay + targetDay;
+  }
+  
+  const targetDate = new Date(today);
+  targetDate.setDate(today.getDate() + daysUntil);
+  return targetDate.toISOString().split('T')[0];
 }
 
 function parseDeadline(text) {
@@ -430,11 +465,22 @@ function getTomorrow() {
 
 function getNextFriday() {
   const today = new Date();
-  const dayOfWeek = today.getDay();
-  const daysUntilFriday = (5 - dayOfWeek + 7) % 7 || 7;
+  const dayOfWeek = today.getDay(); // 0 = Sunday, 5 = Friday
+  let daysUntilFriday;
+  
+  if (dayOfWeek < 5) {
+    // If today is before Friday, get this Friday
+    daysUntilFriday = 5 - dayOfWeek;
+  } else {
+    // If today is Friday or after, get next Friday
+    daysUntilFriday = 7 - dayOfWeek + 5;
+  }
+  
   const friday = new Date(today);
   friday.setDate(today.getDate() + daysUntilFriday);
   return friday.toISOString().split('T')[0];
 }
 
 console.log('🤖 Telegram bot is running...');
+console.log('API URL:', API_URL);
+console.log('OpenAI enabled:', OPENAI_API_KEY ? 'Yes' : 'No');
