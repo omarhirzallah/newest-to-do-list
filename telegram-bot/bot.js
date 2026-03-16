@@ -54,11 +54,16 @@ async function parseTaskWithAI(text, username) {
   "assigned_to": ["saleh"] or ["ahmad"] or ["omar"] or multiple
 }
 
+IMPORTANT: The user creating this task is "${username}". If no specific person is mentioned in the task, assign it to "${username}".
+
 Today is ${new Date().toISOString().split('T')[0]}. 
 - "tomorrow" = add 1 day
 - "Friday" = next Friday
 - "urgent/important/asap" = high priority
-- If no assignment mentioned, assign to the user creating it
+- If task mentions "for saleh" or "@saleh", assign to saleh
+- If task mentions "for ahmad" or "@ahmad", assign to ahmad  
+- If task mentions "for omar" or "@omar", assign to omar
+- If NO assignment mentioned, assign to "${username}" (the person creating it)
 - Default priority: medium
 - Default deadline: tomorrow`
           },
