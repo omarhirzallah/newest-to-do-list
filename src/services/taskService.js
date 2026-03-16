@@ -92,29 +92,48 @@ const initializeTasks = () => {
 
 export const getTasks = async () => {
   try {
+    console.log('Fetching tasks from:', API_URL + '/tasks');
     const response = await fetch(`${API_URL}/tasks`);
-    if (!response.ok) throw new Error('Backend unavailable');
+    console.log('Response status:', response.status);
+    
+    if (!response.ok) {
+      throw new Error(`Backend returned ${response.status}`);
+    }
+    
     const tasks = await response.json();
+    console.log('Fetched tasks:', tasks.length, 'tasks');
     return tasks.map(mapTaskFromAPI);
   } catch (error) {
-    console.error('Error fetching tasks:', error);
+    console.error('❌ Error fetching tasks:', error);
+    console.error('API URL:', API_URL);
     return []; // Return empty array if backend fails
   }
 };
 
 export const addTask = async (task) => {
   try {
+    console.log('Creating task:', task);
     const response = await fetch(`${API_URL}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(mapTaskToAPI(task)),
     });
-    if (!response.ok) throw new Error('Failed to create task');
+    
+    console.log('Create response status:', response.status);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Backend error:', errorText);
+      throw new Error(`Failed to create task: ${response.status}`);
+    }
+    
     const newTask = await response.json();
+    console.log('✅ Task created:', newTask);
     notifyTaskUpdate();
     return mapTaskFromAPI(newTask);
   } catch (error) {
-    console.error('Error creating task:', error);
+    console.error('❌ Error creating task:', error);
+    alert('Failed to create task. Check console for details.');
     throw error;
   }
 };
