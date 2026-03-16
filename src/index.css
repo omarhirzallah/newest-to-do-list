@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-lol-dark text-white;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-gradient-to-br from-lol-blue/40 to-lol-dark/60 backdrop-blur-md border border-lol-cyan/20;
+  }
+  
+  .glow-text {
+    text-shadow: 0 0 10px rgba(11, 197, 234, 0.8);
+  }
+}
