@@ -1,5 +1,5 @@
 // Hardcoded Railway backend URL - works across all devices!
-const API_URL = 'https://newest-to-do-list-production.up.railway.app/api';
+const API_URL = 'https://kind-insight-production.up.railway.app/api';
 
 // Fallback to localStorage if backend is unavailable
 const STORAGE_KEY = 'team_tasks';
