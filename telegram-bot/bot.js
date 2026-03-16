@@ -15,14 +15,16 @@ const userStates = {};
 const getUserMapping = (telegramUser) => {
   const firstName = telegramUser.first_name?.toLowerCase() || '';
   const username = telegramUser.username?.toLowerCase() || '';
+  const userId = telegramUser.id;
   
   // Try to match to team members
   if (firstName.includes('saleh') || username.includes('saleh')) return 'saleh';
   if (firstName.includes('ahmad') || username.includes('ahmad')) return 'ahmad';
   if (firstName.includes('omar') || username.includes('omar')) return 'omar';
   
-  // Default to first name or username
-  return username || firstName || 'user';
+  // Default to 'saleh' for testing (change this to your preferred default)
+  console.log(`User mapping: ${firstName} (${username}) -> defaulting to saleh`);
+  return 'saleh';
 };
 
 // Parse task using OpenAI (if API key is provided)
@@ -134,6 +136,7 @@ bot.onText(/\/help/, (msg) => {
 /newtask - Create a detailed task
 /mytasks - View your tasks
 /alltasks - View all team tasks
+/whoami - Check your user mapping
 /help - Show this help
 
 Quick Add:
@@ -146,6 +149,23 @@ I'll automatically detect:
 ✅ Deadlines (today, tomorrow, Friday, dates)
 ✅ Priority (high, medium, low)
 ✅ Assignments (@saleh, @ahmad, @omar)
+  `);
+});
+
+// Who am I command (debug)
+bot.onText(/\/whoami/, (msg) => {
+  const chatId = msg.chat.id;
+  const user = getUserMapping(msg.from);
+  const firstName = msg.from.first_name || 'Unknown';
+  const username = msg.from.username || 'No username';
+  
+  bot.sendMessage(chatId, `
+👤 Your Info:
+Name: ${firstName}
+Username: @${username}
+Mapped to: ${user}
+
+If this is wrong, your Telegram name/username should include: saleh, ahmad, or omar
   `);
 });
 
