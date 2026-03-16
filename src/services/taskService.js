@@ -1,89 +1,128 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+// Temporary localStorage solution until backend is deployed
+// This will work on single device until you configure Railway backend
 
-const mapTaskFromAPI = (task) => ({
-  id: task.id.toString(),
-  title: task.title,
-  description: task.description,
-  assignedTo: task.assigned_to || [],
-  priority: task.priority,
-  status: task.status,
-  deadline: task.deadline,
-  createdAt: task.created_at,
-});
+const STORAGE_KEY = 'team_tasks';
 
-const mapTaskToAPI = (task) => ({
-  title: task.title,
-  description: task.description,
-  assigned_to: task.assignedTo,
-  priority: task.priority,
-  status: task.status,
-  deadline: task.deadline,
-});
+const INITIAL_TASKS = [
+  {
+    id: '1',
+    title: 'Follow up with client leads',
+    description: 'Contact the 5 new leads from last week',
+    assignedTo: ['saleh'],
+    priority: 'high',
+    status: 'in progress',
+    deadline: '2026-03-18',
+    createdAt: '2026-03-10T10:00:00.000Z',
+  },
+  {
+    id: '2',
+    title: 'Prepare Q1 sales report',
+    description: 'Compile all sales data and create presentation',
+    assignedTo: ['saleh'],
+    priority: 'medium',
+    status: 'todo',
+    deadline: '2026-03-20',
+    createdAt: '2026-03-12T09:00:00.000Z',
+  },
+  {
+    id: '3',
+    title: 'Update CRM database',
+    description: 'Add new contacts and update existing records',
+    assignedTo: ['ahmad'],
+    priority: 'medium',
+    status: 'in progress',
+    deadline: '2026-03-17',
+    createdAt: '2026-03-11T14:00:00.000Z',
+  },
+  {
+    id: '4',
+    title: 'Client presentation prep',
+    description: 'Create slides for Thursday client meeting',
+    assignedTo: ['omar', 'ahmad'],
+    priority: 'high',
+    status: 'in progress',
+    deadline: '2026-03-16',
+    createdAt: '2026-03-15T10:00:00.000Z',
+  },
+  {
+    id: '5',
+    title: 'Joint sales strategy meeting',
+    description: 'Collaborate on new sales approach for Q2',
+    assignedTo: ['omar', 'ahmad', 'saleh'],
+    priority: 'high',
+    status: 'todo',
+    deadline: '2026-03-22',
+    createdAt: '2026-03-16T09:00:00.000Z',
+  },
+];
+
+// Initialize tasks in localStorage if not exists
+const initializeTasks = () => {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (!stored) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_TASKS));
+    return INITIAL_TASKS;
+  }
+  return JSON.parse(stored);
+};
 
 export const getTasks = async () => {
-  try {
-    const response = await fetch(`${API_URL}/tasks`);
-    if (!response.ok) throw new Error('Failed to fetch tasks');
-    const tasks = await response.json();
-    return tasks.map(mapTaskFromAPI);
-  } catch (error) {
-    console.error('Error fetching tasks:', error);
-    return [];
-  }
+  return Promise.resolve(initializeTasks());
 };
 
 export const addTask = async (task) => {
-  try {
-    const response = await fetch(`${API_URL}/tasks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(mapTaskToAPI(task)),
-    });
-    if (!response.ok) throw new Error('Failed to create task');
-    const newTask = await response.json();
-    return mapTaskFromAPI(newTask);
-  } catch (error) {
-    console.error('Error creating task:', error);
-    throw error;
-  }
+  const tasks = initializeTasks();
+  const newTask = {
+    ...task,
+    id: Date.now().toString(),
+    createdAt: new Date().toISOString(),
+  };
+  tasks.push(newTask);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+  notifyTaskUpdate();
+  return newTask;
 };
 
 export const updateTask = async (taskId, updates) => {
-  try {
-    const response = await fetch(`${API_URL}/tasks/${taskId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(mapTaskToAPI(updates)),
-    });
-    if (!response.ok) throw new Error('Failed to update task');
-    const updatedTask = await response.json();
-    return mapTaskFromAPI(updatedTask);
-  } catch (error) {
-    console.error('Error updating task:', error);
-    throw error;
+  const tasks = initializeTasks();
+  const index = tasks.findIndex((t) => t.id === taskId);
+  if (index !== -1) {
+    tasks[index] = { ...tasks[index], ...updates };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    notifyTaskUpdate();
   }
 };
 
 export const deleteTask = async (taskId) => {
-  try {
-    const response = await fetch(`${API_URL}/tasks/${taskId}`, {
-      method: 'DELETE',
-    });
-    if (!response.ok) throw new Error('Failed to delete task');
-  } catch (error) {
-    console.error('Error deleting task:', error);
-    throw error;
-  }
+  const tasks = initializeTasks();
+  const filtered = tasks.filter((t) => t.id !== taskId);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+  notifyTaskUpdate();
 };
 
 export const subscribeToTasks = (callback) => {
-  const fetchTasks = async () => {
+  // Initial load
+  getTasks().then(callback);
+  
+  // Listen for custom update events
+  const handleTaskUpdate = async () => {
     const tasks = await getTasks();
     callback(tasks);
   };
 
-  fetchTasks();
-  const interval = setInterval(fetchTasks, 5000);
+  window.addEventListener('tasksUpdated', handleTaskUpdate);
 
-  return () => clearInterval(interval);
+  return () => {
+    window.removeEventListener('tasksUpdated', handleTaskUpdate);
+  };
+};
+
+// Helper to trigger updates
+const notifyTaskUpdate = () => {
+  window.dispatchEvent(new Event('tasksUpdated'));
+};
+
+// Initialize database (for compatibility with App.jsx)
+export const initializeDatabase = () => {
+  initializeTasks();
 };
