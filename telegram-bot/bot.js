@@ -292,21 +292,26 @@ async function handleTaskQuery(chatId, text, username) {
     const response = await fetch(`${API_URL}/tasks`);
     const allTasks = await response.json();
     
-    // Filter based on query
-    let tasks = allTasks.filter(t => t.assigned_to.includes(username));
+    // Filter tasks assigned to user
+    let tasks = allTasks.filter(t => {
+      const assignedTo = Array.isArray(t.assigned_to) ? t.assigned_to : [t.assigned_to];
+      return assignedTo.includes(username);
+    });
     
-    // Filter by date if mentioned
+    // Filter by date only if specifically mentioned
     const today = getToday();
     const tomorrow = getTomorrow();
     
-    if (text.toLowerCase().includes('today')) {
+    const textLower = text.toLowerCase();
+    if (textLower.includes('today') && !textLower.includes('tomorrow')) {
       tasks = tasks.filter(t => t.deadline === today);
-    } else if (text.toLowerCase().includes('tomorrow')) {
+    } else if (textLower.includes('tomorrow')) {
       tasks = tasks.filter(t => t.deadline === tomorrow);
     }
+    // Otherwise show all tasks
 
     if (tasks.length === 0) {
-      bot.sendMessage(chatId, '📭 No tasks found matching your query.');
+      bot.sendMessage(chatId, '📭 No tasks found. Try creating one by typing: "Prepare report by Friday"');
       return;
     }
 
@@ -323,7 +328,8 @@ async function handleTaskQuery(chatId, text, username) {
 
     bot.sendMessage(chatId, message);
   } catch (error) {
-    bot.sendMessage(chatId, '❌ Error fetching tasks.');
+    console.error('Error fetching tasks:', error);
+    bot.sendMessage(chatId, '❌ Error fetching tasks. Make sure backend is running.');
   }
 }
 
