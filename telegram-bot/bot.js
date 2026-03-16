@@ -2,9 +2,9 @@ import TelegramBot from 'node-telegram-bot-api';
 import fetch from 'node-fetch';
 
 // Hardcoded configuration - no setup needed!
-const BOT_TOKEN = '8553890523:AAE-kpeYfUPq-AgnLNKIBuVzLA8Wj3syZcE';
-const API_URL = 'https://kind-insight-production.up.railway.app/api';
-const OPENAI_API_KEY = 'YOUR_OPENAI_API_KEY_HERE'; // Add your OpenAI key here for smart task parsing
+const BOT_TOKEN = process.env.BOT_TOKEN || '8553890523:AAE-kpeYfUPq-AgnLNKIBuVzLA8Wj3syZcE';
+const API_URL = process.env.API_URL || 'https://kind-insight-production.up.railway.app/api';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''; // Set in Railway environment variables
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
@@ -39,11 +39,26 @@ async function parseTaskWithAI(text, username) {
         'Authorization': `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4o-mini',
         messages: [
           {
             role: 'system',
-            content: `You are a task parser. Extract task details from user input and return JSON with: title, description, priority (high/medium/low), deadline (YYYY-MM-DD), assigned_to (array of: saleh, ahmad, omar). Today is ${new Date().toISOString().split('T')[0]}.`
+            content: `You are a task parser for a team of 3: Saleh, Ahmad, and Omar. Extract task details and return ONLY valid JSON (no markdown, no explanation) with these exact fields:
+{
+  "title": "brief task title",
+  "description": "detailed description if provided",
+  "priority": "high" or "medium" or "low",
+  "deadline": "YYYY-MM-DD format",
+  "assigned_to": ["saleh"] or ["ahmad"] or ["omar"] or multiple
+}
+
+Today is ${new Date().toISOString().split('T')[0]}. 
+- "tomorrow" = add 1 day
+- "Friday" = next Friday
+- "urgent/important/asap" = high priority
+- If no assignment mentioned, assign to the user creating it
+- Default priority: medium
+- Default deadline: tomorrow`
           },
           {
             role: 'user',
@@ -51,16 +66,18 @@ async function parseTaskWithAI(text, username) {
           }
         ],
         temperature: 0.3,
+        response_format: { type: "json_object" }
       }),
     });
 
     const data = await response.json();
-    const parsed = JSON.parse(data.choices[0].message.content);
+    const content = data.choices[0].message.content;
+    const parsed = JSON.parse(content);
     
     return {
       title: parsed.title || text,
       description: parsed.description || '',
-      assigned_to: parsed.assigned_to || [username],
+      assigned_to: Array.isArray(parsed.assigned_to) ? parsed.assigned_to : [username],
       priority: parsed.priority || 'medium',
       status: 'todo',
       deadline: parsed.deadline || getTomorrow(),
