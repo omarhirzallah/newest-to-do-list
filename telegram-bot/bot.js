@@ -29,17 +29,25 @@ const getUserMapping = (telegramUser) => {
 
 // Parse task using OpenAI (if API key is provided)
 async function parseTaskWithAI(text, username) {
-  if (!OPENAI_API_KEY || OPENAI_API_KEY === 'YOUR_OPENAI_API_KEY_HERE') {
+  if (!OPENAI_API_KEY || OPENAI_API_KEY === 'YOUR_OPENAI_API_KEY_HERE' || OPENAI_API_KEY === '') {
+    console.log('No OpenAI key, using simple parser');
     return parseTaskSimple(text, username);
   }
 
   try {
+    console.log('Calling OpenAI API...');
+    
+    // Add timeout to prevent hanging
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${OPENAI_API_KEY}`,
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: [
@@ -77,7 +85,17 @@ Today is ${new Date().toISOString().split('T')[0]}.
       }),
     });
 
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('OpenAI API error:', response.status, errorText);
+      throw new Error(`OpenAI API error: ${response.status}`);
+    }
+
     const data = await response.json();
+    console.log('OpenAI response:', data);
+    
     const content = data.choices[0].message.content;
     const parsed = JSON.parse(content);
     
@@ -90,7 +108,7 @@ Today is ${new Date().toISOString().split('T')[0]}.
       deadline: parsed.deadline || getTomorrow(),
     };
   } catch (error) {
-    console.error('OpenAI parsing failed, using simple parser:', error);
+    console.error('OpenAI parsing failed, using simple parser:', error.message);
     return parseTaskSimple(text, username);
   }
 }
@@ -142,6 +160,7 @@ bot.onText(/\/help/, (msg) => {
 /mytasks - View your tasks
 /alltasks - View all team tasks
 /whoami - Check your user mapping
+/debug - Test backend connection
 /help - Show this help
 
 Quick Add:
@@ -178,6 +197,50 @@ Mapped to: ${user}
 
 If this is wrong, your Telegram name/username should include: saleh, ahmad, or omar
   `);
+});
+
+// Debug command - test backend connection
+bot.onText(/\/debug/, async (msg) => {
+  const chatId = msg.chat.id;
+  const username = getUserMapping(msg.from);
+  
+  bot.sendMessage(chatId, '🔍 Running diagnostics...');
+  
+  try {
+    // Test backend connection
+    const response = await fetch(`${API_URL}/tasks`);
+    const tasks = await response.json();
+    
+    // Filter user's tasks
+    const myTasks = tasks.filter(t => {
+      const assignedTo = Array.isArray(t.assigned_to) ? t.assigned_to : [t.assigned_to];
+      return assignedTo.includes(username);
+    });
+    
+    let debugInfo = `✅ Backend connected: ${API_URL}\n`;
+    debugInfo += `📊 Total tasks in DB: ${tasks.length}\n`;
+    debugInfo += `👤 Your username: ${username}\n`;
+    debugInfo += `📋 Your tasks: ${myTasks.length}\n\n`;
+    
+    if (myTasks.length > 0) {
+      debugInfo += `Your tasks:\n`;
+      myTasks.forEach((t, i) => {
+        debugInfo += `${i + 1}. ${t.title} (${t.deadline})\n`;
+        debugInfo += `   Assigned to: ${JSON.stringify(t.assigned_to)}\n`;
+      });
+    } else {
+      debugInfo += `No tasks found for user: ${username}\n\n`;
+      debugInfo += `All tasks in DB:\n`;
+      tasks.slice(0, 5).forEach((t, i) => {
+        debugInfo += `${i + 1}. ${t.title}\n`;
+        debugInfo += `   Assigned to: ${JSON.stringify(t.assigned_to)}\n`;
+      });
+    }
+    
+    bot.sendMessage(chatId, debugInfo);
+  } catch (error) {
+    bot.sendMessage(chatId, `❌ Backend error: ${error.message}\n\nAPI URL: ${API_URL}`);
+  }
 });
 
 // New task command (detailed)
@@ -269,14 +332,14 @@ bot.on('message', async (msg) => {
   }
 
   // Check if it's a query about tasks (not creating a task)
-  const queryKeywords = /what|show|list|view|see|tell|get|display|check|my tasks|today|tomorrow/i;
-  const isQuery = queryKeywords.test(text) && (
-    text.toLowerCase().includes('task') ||
-    text.toLowerCase().includes('today') ||
-    text.toLowerCase().includes('tomorrow') ||
-    text.toLowerCase().includes('my') ||
-    text.toLowerCase().includes('show') ||
-    text.toLowerCase().includes('list')
+  const isQuery = (
+    // Question words
+    /^(what|show|list|view|see|tell|get|display|check|do i have)/i.test(text) ||
+    // Contains "my tasks" or similar
+    /my\s+(tasks?|to-?dos?)/i.test(text) ||
+    // Contains time references with task words
+    /(today|tomorrow|this week).*tasks?/i.test(text) ||
+    /tasks?.*(today|tomorrow|this week)/i.test(text)
   );
 
   if (isQuery) {
@@ -288,7 +351,9 @@ bot.on('message', async (msg) => {
   // Quick task creation with AI or simple parsing
   bot.sendMessage(chatId, '🤖 Creating task...');
   try {
+    console.log(`[${username}] Creating task from text: "${text}"`);
     const task = await parseTaskWithAI(text, username);
+    console.log(`[${username}] Parsed task:`, task);
     await createTask(chatId, task);
   } catch (error) {
     console.error('Task creation error:', error);
@@ -382,7 +447,8 @@ async function createQuickTask(chatId, text, username) {
 // Create task via API
 async function createTask(chatId, taskData) {
   try {
-    console.log('Creating task:', taskData);
+    console.log('Creating task via API:', taskData);
+    console.log('API URL:', `${API_URL}/tasks`);
     
     const response = await fetch(`${API_URL}/tasks`, {
       method: 'POST',
@@ -390,17 +456,20 @@ async function createTask(chatId, taskData) {
       body: JSON.stringify(taskData),
     });
 
+    console.log('API response status:', response.status);
+
     if (response.ok) {
       const created = await response.json();
+      console.log('Task created successfully:', created);
       bot.sendMessage(chatId, `✅ Task created!\n\n📝 ${taskData.title}\n📅 ${taskData.deadline}\n👤 ${taskData.assigned_to.join(', ')}\n🎯 Priority: ${taskData.priority}`);
     } else {
       const errorText = await response.text();
-      console.error('Backend error:', errorText);
-      bot.sendMessage(chatId, '❌ Failed to create task. Backend error: ' + response.status);
+      console.error('Backend error:', response.status, errorText);
+      bot.sendMessage(chatId, `❌ Failed to create task. Backend error: ${response.status}\n${errorText}`);
     }
   } catch (error) {
-    console.error('Network error:', error);
-    bot.sendMessage(chatId, '❌ Error creating task. Check if backend is running.');
+    console.error('Network error creating task:', error);
+    bot.sendMessage(chatId, `❌ Error creating task: ${error.message}\n\nCheck if backend is running at: ${API_URL}`);
   }
 }
 
