@@ -145,10 +145,16 @@ Just type your task naturally:
 • "Prepare report by Friday high priority"
 • "Meeting with team"
 
+Ask Questions:
+• "What are my tasks for today?"
+• "Show me my tasks"
+• "What do I have tomorrow?"
+
 I'll automatically detect:
 ✅ Deadlines (today, tomorrow, Friday, dates)
 ✅ Priority (high, medium, low)
 ✅ Assignments (@saleh, @ahmad, @omar)
+✅ Questions vs task creation
   `);
 });
 
@@ -257,11 +263,69 @@ bot.on('message', async (msg) => {
     return;
   }
 
+  // Check if it's a query about tasks (not creating a task)
+  const queryKeywords = /what|show|list|view|see|tell|get|display|check|my tasks|today|tomorrow/i;
+  const isQuery = queryKeywords.test(text) && (
+    text.toLowerCase().includes('task') ||
+    text.toLowerCase().includes('today') ||
+    text.toLowerCase().includes('tomorrow') ||
+    text.toLowerCase().includes('my') ||
+    text.toLowerCase().includes('show') ||
+    text.toLowerCase().includes('list')
+  );
+
+  if (isQuery) {
+    // It's a query, show tasks
+    await handleTaskQuery(chatId, text, username);
+    return;
+  }
+
   // Quick task creation with AI or simple parsing
   bot.sendMessage(chatId, '🤖 Creating task...');
   const task = await parseTaskWithAI(text, username);
   await createTask(chatId, task);
 });
+
+// Handle task queries
+async function handleTaskQuery(chatId, text, username) {
+  try {
+    const response = await fetch(`${API_URL}/tasks`);
+    const allTasks = await response.json();
+    
+    // Filter based on query
+    let tasks = allTasks.filter(t => t.assigned_to.includes(username));
+    
+    // Filter by date if mentioned
+    const today = getToday();
+    const tomorrow = getTomorrow();
+    
+    if (text.toLowerCase().includes('today')) {
+      tasks = tasks.filter(t => t.deadline === today);
+    } else if (text.toLowerCase().includes('tomorrow')) {
+      tasks = tasks.filter(t => t.deadline === tomorrow);
+    }
+
+    if (tasks.length === 0) {
+      bot.sendMessage(chatId, '📭 No tasks found matching your query.');
+      return;
+    }
+
+    let message = `📋 Your Tasks (${tasks.length}):\n\n`;
+    
+    tasks.forEach((task, i) => {
+      const status = task.status === 'completed' ? '✅' : task.status === 'in progress' ? '🔄' : '⏳';
+      const priority = task.priority === 'high' ? '🔴' : task.priority === 'medium' ? '🟡' : '🟢';
+      message += `${i + 1}. ${status} ${priority} ${task.title}\n`;
+      message += `   📅 ${task.deadline}\n`;
+      if (task.description) message += `   📝 ${task.description}\n`;
+      message += `   Status: ${task.status}\n\n`;
+    });
+
+    bot.sendMessage(chatId, message);
+  } catch (error) {
+    bot.sendMessage(chatId, '❌ Error fetching tasks.');
+  }
+}
 
 // Handle multi-step task creation
 async function handleTaskCreationStep(chatId, text, username) {
